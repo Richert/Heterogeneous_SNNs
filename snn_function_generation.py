@@ -7,7 +7,8 @@ from scipy.ndimage import gaussian_filter1d
 
 """
 Script that trains a population of Izhikevich neurons to generate a target function via reservoir computing.
-
+Beware that running this script can take considerable time and requires around 25 GB of working memory.
+ 
 To run this code, you need Python >= 3.7 with PyRates >= 1.0.0 (https://github.com/pyrates-neuroscience/PyRates) and 
 RectiPy >= 0.12.0 (https://github.com/pyrates-neuroscience/RectiPy) installed.
 """
@@ -39,6 +40,7 @@ def get_signals(stim_onsets: list, cycle_steps: int, sr: int, net: Network, y0: 
     signals = []
     inputs = []
     start = int(np.round(cycle_steps / sr))
+    n = len(stim_onsets)
     for i, stim in enumerate(stim_onsets):
         inp = np.zeros((stim + cycle_steps, N))
         inp[stim:stim + stim_width, inp_indices] = alpha
@@ -48,6 +50,7 @@ def get_signals(stim_onsets: list, cycle_steps: int, sr: int, net: Network, y0: 
         res = obs.to_numpy("out")[-start:, :]
         signals.append(gaussian_filter1d(res, sigma=sigma, axis=0).T)
         inputs.append(inp[::sr, inp_indices[0]][-start:])
+        print(f"Finished simulation of trial #{i+1} of {n}.")
 
     return signals, inputs
 
@@ -68,8 +71,7 @@ def get_c(X: np.ndarray, alpha: float = 1e-4):
 ###################
 
 # condition
-cond = "hom"
-Delta = 0.1
+Delta = 2.0
 alpha = 80.0
 
 # training and testing
@@ -78,7 +80,6 @@ n_tests = 5
 
 # working directory
 wdir = "config"
-tdir = "results"
 
 # model parameters
 N = 1000
@@ -165,19 +166,26 @@ net.add_diffeq_node("rs", node=f"{wdir}/ik_snn/rs", weights=W, source_var="s", t
                     node_vars=node_vars.copy(), op="rs_op", spike_reset=v_reset, spike_threshold=v_spike,
                     clear=True)
 
+print("Finding a stable initial network state ...")
+
 # perform simulation to determine intrinsic oscillation frequency
 init_steps = int(T_init/dt)
 inp = np.zeros((init_steps, 1))
 
 # perform additional wash-out simulation to obtain a common initial state
-net.run(inputs=inp, sampling_steps=init_steps, verbose=True, enable_grad=False)
+net.run(inputs=inp, sampling_steps=init_steps, verbose=False, enable_grad=False)
 y0 = net.state
+
+print("Finished simulation to find a stable initial network state.")
 
 # main simulation
 #################
 
+print("Starting the simulation of the network responses to extrinsic stimulation ... ")
 # get signals for each stimulation onset
 signals, inputs = get_signals(stim_onsets, cycle_steps, sr, net, y0, inp_indices, sigma=sigma)
+
+print("Starting the analysis of the function generation capacities of the network ...")
 
 # extract results for training and testing
 train_signals = [signals[idx] for idx in train_trials]
@@ -227,6 +235,8 @@ for j in range(K.shape[0]):
 K_mean = np.mean(K_shifted, axis=0)
 K_var = np.var(K_shifted, axis=0)
 K_diag = np.diag(K)
+
+print("Finished the analysis of the function generation capacities of the network.")
 
 ################
 # plot results #
